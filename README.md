@@ -2,7 +2,7 @@
 
 **Metronos** (from the Ancient Greek *μέτρον* /metron/, meaning "measure" or "that by which anything is measured.")
 
-A lightweight Python library for physical quantities with units. No heavy dependencies, no type-hint clutter, no user-facing registries — just quantities that know what they are and refuse to let you mix them up.
+A lightweight Python library for physical quantities with units. No heavy dependencies, no mandatory annotations, no user-facing registries — just quantities that know what they are and refuse to let you mix them up.
 
 ---
 
@@ -129,5 +129,5 @@ All SI base and derived units support the full prefix set (`n`, `µ`, `m`, `k`, 
 ## Philosophy
 
 - **Lean:** No dependencies beyond the Python standard library.
-- **Dynamic:** No type hints. It works the way Python was meant to work.
+- **Pythonic:** Clean, simple API with no mandatory annotations or boilerplate.
 - **Intuitive:** It handles the dimensional math so you can focus on the physics.

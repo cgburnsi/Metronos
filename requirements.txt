@@ -26,7 +26,9 @@ matplotlib>=3.9.2
 
 # Building and Tests
 build
-#pytest>=7.0.0
+twine
+pytest
+#pytest-cov>=4.0.0
 #pytest-cov>=4.0.0
 
 # Dependencies
