@@ -264,6 +264,25 @@ UNITS = {
 }
 
 
+_SI_BASE = ['m', 'kg', 's', 'A', 'K', 'mol', 'cd']
+
+def _dims_to_si_str(dims):
+    pos = []
+    neg = []
+    for i, exp in enumerate(dims):
+        if exp == 0:
+            continue
+        sym = _SI_BASE[i]
+        label = sym if abs(exp) == 1 else '%s^%g' % (sym, abs(exp))
+        (pos if exp > 0 else neg).append(label)
+    if not pos and not neg:
+        return 'dimensionless'
+    result = '*'.join(pos) if pos else '1'
+    if neg:
+        result += '/' + '*'.join(neg)
+    return result
+
+
 def parse_unit(unit_str):
     parts = [p.strip() for p in unit_str.split('/')]
     numerator, denominators = parts[0], parts[1:]
@@ -300,33 +319,42 @@ def _resolve_unit(unit_s):
 class Quantity:
     def __init__(self, value, unit=''):
         self.unit_str = unit
-        self._value = value
         if unit:
             u = parse_unit(unit)
+            self._unit_def = u
             self._si_value = (value + u.offset) * u.coef
             self._dims = (u.L, u.M, u.T, u.I, u.THETA, u.N, u.J)
         else:
+            self._unit_def = None
             self._si_value = float(value)
             self._dims = (0, 0, 0, 0, 0, 0, 0)
 
     @classmethod
-    def _from_si(cls, si_value, dims, unit_str=''):
+    def _from_si(cls, si_value, dims, unit_str='', unit_def=None):
         q = cls.__new__(cls)
         q._si_value = si_value
-        q._value = si_value
         q._dims = dims
         q.unit_str = unit_str
+        q._unit_def = unit_def
         return q
 
     def __repr__(self):
-        if self.unit_str:
-            return 'Quantity(%s [%s])' % (self._value, self.unit_str)
-        return 'Quantity(%s)' % self._si_value
+        if self.unit_str and self._unit_def:
+            display = self._si_value / self._unit_def.coef - self._unit_def.offset
+            return 'Quantity(%s [%s])' % (display, self.unit_str)
+        return 'Quantity(%s [%s])' % (self._si_value, _dims_to_si_str(self._dims))
 
     def __add__(self, other):
         if self._dims != other._dims:
             raise DimensionError(self.unit_str, other.unit_str, self._dims, other._dims)
-        return Quantity._from_si(self._si_value + other._si_value, self._dims)
+        unit_str, unit_def = (self.unit_str, self._unit_def) if self.unit_str == other.unit_str else ('', None)
+        return Quantity._from_si(self._si_value + other._si_value, self._dims, unit_str, unit_def)
+
+    def __sub__(self, other):
+        if self._dims != other._dims:
+            raise DimensionError(self.unit_str, other.unit_str, self._dims, other._dims)
+        unit_str, unit_def = (self.unit_str, self._unit_def) if self.unit_str == other.unit_str else ('', None)
+        return Quantity._from_si(self._si_value - other._si_value, self._dims, unit_str, unit_def)
 
     def __mul__(self, other):
         if isinstance(other, (int, float)):
@@ -334,14 +362,150 @@ class Quantity:
         dims = tuple(a + b for a, b in zip(self._dims, other._dims))
         return Quantity._from_si(self._si_value * other._si_value, dims)
 
+    def __rmul__(self, other):
+        if isinstance(other, (int, float)):
+            return Quantity._from_si(self._si_value * other, self._dims)
+        return NotImplemented
+
+    def __truediv__(self, other):
+        if isinstance(other, (int, float)):
+            return Quantity._from_si(self._si_value / other, self._dims)
+        dims = tuple(a - b for a, b in zip(self._dims, other._dims))
+        return Quantity._from_si(self._si_value / other._si_value, dims)
+
+    def __rtruediv__(self, other):
+        if isinstance(other, (int, float)):
+            dims = tuple(-d for d in self._dims)
+            return Quantity._from_si(other / self._si_value, dims)
+        return NotImplemented
+
+    def __pow__(self, power):
+        dims = tuple(d * power for d in self._dims)
+        return Quantity._from_si(self._si_value ** power, dims)
+
+    def __neg__(self):
+        return Quantity._from_si(-self._si_value, self._dims, self.unit_str, self._unit_def)
+
+    def __abs__(self):
+        return Quantity._from_si(abs(self._si_value), self._dims, self.unit_str, self._unit_def)
+
+    def __float__(self):
+        if any(self._dims):
+            raise TypeError("Cannot convert a dimensioned Quantity to float; use .value or .to() first.")
+        return float(self._si_value)
+
+    def __eq__(self, other):
+        if not isinstance(other, Quantity):
+            return NotImplemented
+        if self._dims != other._dims:
+            return False
+        return self._si_value == other._si_value
+
+    def __hash__(self):
+        return hash((self._si_value, self._dims))
+
+    def __lt__(self, other):
+        if self._dims != other._dims:
+            raise DimensionError(self.unit_str, other.unit_str, self._dims, other._dims)
+        return self._si_value < other._si_value
+
+    def __le__(self, other):
+        if self._dims != other._dims:
+            raise DimensionError(self.unit_str, other.unit_str, self._dims, other._dims)
+        return self._si_value <= other._si_value
+
+    def __gt__(self, other):
+        if self._dims != other._dims:
+            raise DimensionError(self.unit_str, other.unit_str, self._dims, other._dims)
+        return self._si_value > other._si_value
+
+    def __ge__(self, other):
+        if self._dims != other._dims:
+            raise DimensionError(self.unit_str, other.unit_str, self._dims, other._dims)
+        return self._si_value >= other._si_value
+
+    @property
+    def value(self):
+        if self._unit_def:
+            return self._si_value / self._unit_def.coef - self._unit_def.offset
+        return self._si_value
+
+    def to(self, unit_str):
+        u = parse_unit(unit_str)
+        target_dims = (u.L, u.M, u.T, u.I, u.THETA, u.N, u.J)
+        if self._dims != target_dims:
+            raise DimensionError(self.unit_str, unit_str, self._dims, target_dims)
+        return Quantity._from_si(self._si_value, self._dims, unit_str, u)
+
 
 if __name__ == '__main__':
-    a = Quantity(2.0, 'm')
-    b = Quantity(3.1, 'm')
-    c = a + b
-    print(c)
+    sep = '-' * 40
 
-    d = Quantity(1.0, 'ft')
-    e = Quantity(1.0, 'm')
-    print(d)
-    print(e)
+    print(sep)
+    print('Construction and display')
+    print(sep)
+    d = Quantity(6.2, 'ft')
+    v = Quantity(60, 'mile/s')
+    a = Quantity(9.81, 'm/s^2')
+    print('distance :', d)
+    print('velocity :', v)
+    print('accel    :', a)
+
+    print()
+    print(sep)
+    print('Unit conversion')
+    print(sep)
+    print('6.2 ft -> m  :', d.to('m'))
+    print('60 mile/s -> km/s:', v.to('km/s'))
+    print('9.81 m/s^2 -> ft/s^2:', a.to('ft/s^2'))
+
+    print()
+    print(sep)
+    print('Arithmetic')
+    print(sep)
+    d1 = Quantity(100, 'm')
+    d2 = Quantity(0.5, 'km')
+    print('100 m + 0.5 km        :', d1 + d2)
+    print('force = m * a         :', Quantity(70, 'kg') * a)
+    print('KE = 0.5 * m * v^2   :', 0.5 * Quantity(70, 'kg') * Quantity(10, 'm/s') ** 2)
+
+    print()
+    print(sep)
+    print('Temperature conversion')
+    print(sep)
+    boiling = Quantity(100, 'degC')
+    freezing = Quantity(32, 'degF')
+    print('Boiling point in F:', boiling.to('degF'))
+    print('Freezing point in C:', freezing.to('degC'))
+    print('Freezing point in K:', freezing.to('K'))
+
+    print()
+    print(sep)
+    print('Extracting values')
+    print(sep)
+    speed = Quantity(25, 'm/s')
+    print('speed in mph:', speed.to('mile/s').value * 3600)
+    print('abs of -9.81 m/s^2:', abs(Quantity(-9.81, 'm/s^2')))
+
+    print()
+    print(sep)
+    print('Comparisons')
+    print(sep)
+    sprint = Quantity(100, 'm')
+    mile  = Quantity(1, 'mile')
+    print('100 m == 100 m  :', Quantity(100, 'm') == Quantity(100, 'm'))
+    print('100 m == 0.1 km :', Quantity(100, 'm') == Quantity(0.1, 'km'))
+    print('100 m < 1 mile  :', sprint < mile)
+
+    print()
+    print(sep)
+    print('Dimension safety')
+    print(sep)
+    try:
+        Quantity(1, 'm') + Quantity(1, 'kg')
+    except DimensionError as e:
+        print('Caught DimensionError:', e)
+    try:
+        Quantity(1, 'm').to('s')
+    except DimensionError as e:
+        print('Caught DimensionError:', e)

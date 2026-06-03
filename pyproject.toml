@@ -36,3 +36,4 @@ packages = ["src/metronos"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
